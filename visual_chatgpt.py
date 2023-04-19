@@ -203,8 +203,7 @@ def blend_gt2pt(old_image, new_image, sigma=0.15, steps=100):
     gaussian_gt_img = kernel * gt_img_array + (1 - kernel) * pt_gt_img  # gt img with blur img
     gaussian_gt_img = gaussian_gt_img.astype(np.int64)
     easy_img[pos_h:pos_h + old_size[1], pos_w:pos_w + old_size[0]] = gaussian_gt_img
-    gaussian_img = Image.fromarray(easy_img)
-    return gaussian_img
+    return Image.fromarray(easy_img)
 
 
 def cut_dialogue_history(history_memory, keep_last_n_words=500):
@@ -284,7 +283,7 @@ class Text2Image:
                          "The input to this tool should be a string, representing the text used to generate image. ")
     def inference(self, text):
         image_filename = os.path.join('image', f"{str(uuid.uuid4())[:8]}.png")
-        prompt = text + ', ' + self.a_prompt
+        prompt = f'{text}, {self.a_prompt}'
         image = self.pipe(prompt, negative_prompt=self.n_prompt).images[0]
         image.save(image_filename)
         print(
@@ -806,15 +805,15 @@ class Segmenting:
         self.mask_generator = SamAutomaticMaskGenerator(self.sam)
 
     def download_parameters(self):
-        url = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"
         if not os.path.exists(self.model_checkpoint_path):
+            url = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"
             wget.download(url,out=self.model_checkpoint_path)
 
     def show_mask(self, mask, ax, random_color=False):
         if random_color:
             color = np.concatenate([np.random.random(3), np.array([1])], axis=0)
         else:
-            color = np.array([30/255, 144/255, 255/255, 1])
+            color = np.array([30/255, 144/255, 1, 1])
         h, w = mask.shape[-2:]
         mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
         ax.imshow(mask_image)
@@ -918,11 +917,11 @@ class Text2Box:
         self.grounding = (self.load_model()).to(self.device)
 
     def download_parameters(self):
-        url = "https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth"
         if not os.path.exists(self.model_checkpoint_path):
+            url = "https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth"
             wget.download(url,out=self.model_checkpoint_path)
-        config_url = "https://raw.githubusercontent.com/IDEA-Research/GroundingDINO/main/groundingdino/config/GroundingDINO_SwinT_OGC.py"
         if not os.path.exists(self.model_config_path):
+            config_url = "https://raw.githubusercontent.com/IDEA-Research/GroundingDINO/main/groundingdino/config/GroundingDINO_SwinT_OGC.py"
             wget.download(config_url,out=self.model_config_path)
     def load_image(self,image_path):
          # load image
@@ -952,7 +951,7 @@ class Text2Box:
         caption = caption.lower()
         caption = caption.strip()
         if not caption.endswith("."):
-            caption = caption + "."
+            caption = f"{caption}."
         image = image.to(self.device)
         with torch.no_grad():
             outputs = self.grounding(image[None], captions=[caption])
@@ -976,7 +975,7 @@ class Text2Box:
         for logit, box in zip(logits_filt, boxes_filt):
             pred_phrase = get_phrases_from_posmap(logit > self.text_threshold, tokenized, tokenlizer)
             if with_logits:
-                pred_phrases.append(pred_phrase + f"({str(logit.max().item())[:4]})")
+                pred_phrases.append(f"{pred_phrase}({str(logit.max().item())[:4]})")
             else:
                 pred_phrases.append(pred_phrase)
 
@@ -1059,9 +1058,11 @@ class Inpainting:
         self.inpaint = StableDiffusionInpaintPipeline.from_pretrained(
             "runwayml/stable-diffusion-inpainting", revision=self.revision, torch_dtype=self.torch_dtype).to(device)
     def __call__(self, prompt, original_image, mask_image):
-        update_image = self.inpaint(prompt=prompt, image=original_image.resize((512, 512)),
-                                     mask_image=mask_image.resize((512, 512))).images[0]
-        return update_image
+        return self.inpaint(
+            prompt=prompt,
+            image=original_image.resize((512, 512)),
+            mask_image=mask_image.resize((512, 512)),
+        ).images[0]
 
 class InfinityOutPainting:
     template_model = True # Add this line to show this is a template model.
@@ -1086,8 +1087,7 @@ class InfinityOutPainting:
         inputs = self.ImageCaption.processor(image, return_tensors="pt").to(self.ImageCaption.device,
                                                                                 self.ImageCaption.torch_dtype)
         out = self.ImageCaption.model.generate(**inputs)
-        BLIP_caption = self.ImageCaption.processor.decode(out[0], skip_special_tokens=True)
-        return BLIP_caption
+        return self.ImageCaption.processor.decode(out[0], skip_special_tokens=True)
 
     def check_prompt(self, prompt):
         check = f"Here is a paragraph with adjectives. " \
@@ -1126,9 +1126,9 @@ class InfinityOutPainting:
             crop_w = 15 if old_img.size[0] != tosize[0] else 0
             crop_h = 15 if old_img.size[1] != tosize[1] else 0
             old_img = ImageOps.crop(old_img, (crop_w, crop_h, crop_w, crop_h))
-            temp_canvas_size = (expand_ratio * old_img.width if expand_ratio * old_img.width < tosize[0] else tosize[0],
-                                expand_ratio * old_img.height if expand_ratio * old_img.height < tosize[1] else tosize[
-                                    1])
+            temp_canvas_size = min(expand_ratio * old_img.width, tosize[0]), min(
+                expand_ratio * old_img.height, tosize[1]
+            )
             temp_canvas, temp_mask = Image.new("RGB", temp_canvas_size, color="white"), Image.new("L", temp_canvas_size,
                                                                                                   color="white")
             x, y = (temp_canvas.width - old_img.width) // 2, (temp_canvas.height - old_img.height) // 2
@@ -1190,7 +1190,7 @@ class ObjectSegmenting:
 class ImageEditing:
     template_model = True
     def __init__(self, Text2Box:Text2Box, Segmenting:Segmenting, Inpainting:Inpainting):
-        print(f"Initializing ImageEditing")
+        print("Initializing ImageEditing")
         self.sam = Segmenting
         self.grounding = Text2Box
         self.inpaint = Inpainting
@@ -1203,9 +1203,7 @@ class ImageEditing:
         for idx in true_indices:
             padded_slice = tuple(slice(max(0, i - padding), i + padding + 1) for i in idx)
             mask_array[padded_slice] = True
-        new_mask = (mask_array * 255).astype(np.uint8)
-        #new_mask
-        return new_mask
+        return (mask_array * 255).astype(np.uint8)
 
     @prompts(name="Remove Something From The Photo",
              description="useful when you want to remove and object or something from the photo "
@@ -1265,11 +1263,11 @@ class ConversationBot:
         for class_name, module in globals().items():
             if getattr(module, 'template_model', False):
                 template_required_names = {k for k in inspect.signature(module.__init__).parameters.keys() if k!='self'}
-                loaded_names = set([type(e).__name__ for e in self.models.values()])
+                loaded_names = {type(e).__name__ for e in self.models.values()}
                 if template_required_names.issubset(loaded_names):
                     self.models[class_name] = globals()[class_name](
                         **{name: self.models[name] for name in template_required_names})
-        
+
         print(f"All the Available Functions: {self.models}")
 
         self.tools = []
